@@ -2,8 +2,8 @@ import logging
 import dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage
-from langchain_core.messages import AIMessage
+from langchain.memory import ChatMessageHistory
+from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.tracers import LoggingCallbackHandler
 
 dotenv.load_dotenv()
@@ -27,21 +27,21 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
-chain = prompt | chat
+chain = prompt | chat | StrOutputParser()
 
-messages = []
+chat_history = ChatMessageHistory()
 
 while True:
     user_input = input("Please enter message: ")
     if user_input == "exit":
         break
 
-    messages.append(HumanMessage(content=user_input))
+    chat_history.add_user_message(user_input)
 
     resp = chain.invoke(
-        input={"messages": messages},
+        input={"messages": chat_history.messages},
         config={"callbacks": [LoggingCallbackHandler(logger)]}
     )
 
-    print(resp.content)
-    messages.append(AIMessage(content=resp.content))
+    print(resp)
+    chat_history.add_ai_message(resp)
