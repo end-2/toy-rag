@@ -1,31 +1,34 @@
 import logging
 import dotenv
-from langchain_openai import ChatOpenAI
+
 from langchain.memory import ChatMessageHistory
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain.callbacks.tracers import LoggingCallbackHandler
-from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_chroma import Chroma
 
-from chat_history_retriever import ChatHistoryVectorStore
-from reformer import chat_history_reformer, retriever_query_reformer
-from chat import chat_with_context_and_history
+from chain import memoir_qa_chain, multiple_query_generate_chain, multiple_query_retriever_chain, llm_rerank_chain, \
+    reformatting
 
 dotenv.load_dotenv()
 
 logging.basicConfig(level=logging.INFO,
-                    filename="chat.log",
-                    filemode="a",
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 logger = logging.getLogger(__name__)
 
-reformer_llm = ChatOpenAI(model="gpt-3.5-turbo-1106", temperature=0)
-chat_llm = ChatOpenAI(model="gpt-3.5-turbo-1106", temperature=0.2)
+rag_llm = ChatOpenAI(model="gpt-3.5-turbo-1106", temperature=0)
+chat_llm = ChatOpenAI(model="gpt-3.5-turbo-1106", temperature=0.7)
 
-chat_history_vector_store = ChatHistoryVectorStore("test_user", debugging=True)
-retriever = chat_history_vector_store.as_retriever()
+db = Chroma(embedding_function=OpenAIEmbeddings(model="text-embedding-3-small"))
+retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
-chain = chat_with_context_and_history(chat_llm) | StrOutputParser()
+retriever_chain = (
+        multiple_query_generate_chain(rag_llm) |
+        multiple_query_retriever_chain(retriever) |
+        reformatting
+)
 
 chat_history = ChatMessageHistory()
 
@@ -34,21 +37,22 @@ while True:
     if user_input == "exit":
         break
 
-    # retriever_query = (retriever_query_reformer(reformer_llm) | StrOutputParser()).invoke(
-    #     input={"query": user_input},
-    #     config={"callbacks": [LoggingCallbackHandler(logger)]}
-    # )
-    # print(f"Retriever query: {retriever_query}")
-
-    # context = retriever.invoke(retriever_query)
-    context = retriever.invoke(user_input)
-    print(f"Similarity search results: {context}")
-
-    resp = chain.invoke(
+    docs = retriever_chain.invoke(
         input={
-            "context": context,
-            "chat_history": chat_history.messages,
-            "question": user_input,
+            "query": user_input
+        }
+    )
+    contexts = (llm_rerank_chain(rag_llm) | StrOutputParser()).invoke(
+        input={
+            "documents": docs,
+            "query": user_input
+        }
+    )
+    resp = (memoir_qa_chain(chat_llm) | StrOutputParser()).invoke(
+        input={
+            "contexts": contexts,
+            "query": user_input,
+            "messages": ChatMessageHistory().messages
         },
         config={
             "callbacks": [LoggingCallbackHandler(logger)]
@@ -56,15 +60,6 @@ while True:
     )
     print(f"Query response: {resp}")
 
+    db.add_documents([Document(page_content=user_input)])
     # chat_history.add_user_message(user_input)
     # chat_history.add_ai_message(resp)
-    # print(chat_history.messages)
-
-    # history = (chat_history_reformer(reformer_llm) | StrOutputParser()).invoke(
-    #     input={"history": f"Q: {user_input}\nA: {resp}"},
-    #     config={"callbacks": [LoggingCallbackHandler(logger)]}
-    # )
-    # print(f"Reformulated history: {history}")
-    # chat_history_vector_store.add_documents([Document(page_content=history)])
-    chat_history_vector_store.add_documents([Document(page_content=f"Q:{user_input}\nA:{resp}")])
-

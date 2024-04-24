@@ -17,14 +17,16 @@ class ChatHistoryVectorStore:
 
     def as_retriever(self):
         return self.vectorstore.as_retriever(
-            search_type="similarity_score_threshold",
-            search_kwargs={"score_threshold": .5, "k": 3}
+            search_type="similarity",
+            search_kwargs={"k": 3}
+            # search_type="similarity_score_threshold",
+            # search_kwargs={"score_threshold": .5, "k": 3}
         )
 
     def add_documents(self, documents):
         all_splits = self.text_splitter.split_documents(documents)
         if self.debugging:
-            with open("splits.txt", "a") as f:
+            with open("../splits.txt", "a") as f:
                 for split in all_splits:
                     f.write(f"{split.page_content}\n")
         self.vectorstore.add_documents(all_splits)
